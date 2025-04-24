@@ -1,0 +1,353 @@
+---
+title: "Économétrie des Données de Panel - Analyse Économétrique des Défaillances d'Entreprises en France"
+author: "SCHNEIDER HUGO"
+date: "7 Février 2025"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(plm)
+library(ggplot2)
+library(urca)
+library(dynlm)
+library(tseries)
+library(stargazer)
+library(lmtest)
+
+# Définition du répertoire de travail
+setwd("/Users/schneiderhugo/Desktop")
+
+# Chargement des données
+data <- read_excel("Données.xlsx")
+
+# Conversion des variables en numériques
+data <- data %>% mutate(
+  business_failures = as.numeric(business_failures),
+  Unemployment_rate = as.numeric(Unemployment_rate),
+  Gross_domestic_product = as.numeric(Gross_domestic_product)
+)
+
+# Conversion de la colonne temporelle
+data$Year_Trimestre <- as.yearqtr(as.character(data$Year_Trimestre), format = "%Y-T%q")
+```
+
+# I. Introduction
+
+Dans un contexte économique incertain, les faillites représentent souvent un indicateur avancé des cycles économiques. En effet, leur augmentation peut signaler une contraction économique imminente, ce qui rend leur analyse particulièrement pertinente dans la gestion des crises économiques. La politique économique actuelle en France, notamment les mesures de soutien aux entreprises pendant la crise sanitaire, peuvent ainsi jouer un rôle significatif en influençant les taux de faillite. Ainsi, il est nécessaire de comprendre les facteurs sous-jacents des faillites afin de permettre aux décideurs de mieux anticiper les besoins d'ajustements politiques.
+
+L'objectif de cette étude est d'analyser les facteurs influençant les défaillances d'entreprises en France à l'aide de techniques économétriques avancées. Nous cherchons à déterminer l'impact du taux de chômage et du produit intérieur brut (PIB) sur le nombre de faillites d'entreprises sur une période allant de 1990 à 2024.
+
+Nous utilisons plusieurs approches économétriques, notamment une régression OLS classique, un modèle de correction d'erreur (ECM) et un modèle ARDL (AutoRegressive Distributed Lag). Ces différentes approches permettent d’évaluer les relations de court et long terme entre les variables.
+
+
+# II. Cadre Statistique
+
+## 1. Données utilisées et source
+
+Les données couvrent la période 1990 à 2024, avec une fréquence
+trimestrielle et proviennent de l'INSEE. Les variables analysées sont :
+
+-   **Défaillances d'entreprises** : Nombre de défaillances d'entreprises par date de jugement en France
+-   **Taux de chômage** : en pourcentage (chômage au sens du Bureau International du Travail (BIT) ; données corrigées des variations saisonnières, en moyenne trimestrielle.)
+-   **Produit Intérieur Brut** : en milliards d'euros
+
+## 2. Statistiques descriptives
+
+**Analyse descriptive des variables** :
+
+Les statistiques descriptives montrent que le nombre de faillites d’entreprises en France varie considérablement (min : 371, max : 2399), avec une médiane de 1224 et une moyenne de 1290. Le taux de chômage oscille entre 7.1% et 10.7%, avec une moyenne de 9.0%. Le PIB, quant à lui, en croissance sur la période, évolue entre 389 et 650,9 milliards d’euros. Ces tendances suggèrent une corrélation potentielle entre la conjoncture économique et les faillites d’entreprises, ce qui motive l’analyse économétrique menée dans cette étude.
+
+```{r include=FALSE}
+summary(data)
+```
+
+## 3. Tests de stationnarité**
+
+On applique ici le test de Dickey-Fuller augmenté (ADF) pour vérifier la stationnarité des variables.
+Si les variables ne sont pas stationnaires, on applique la différenciation.
+
+Il est essentiel de s'assurer que les séries temporelles sont stationnaires avant d’effectuer une régression, car des séries non stationnaires peuvent conduire à des résultats biaisés et non fiables. La stationnarité garantit ainsi que les propriétés statistiques de la série, telles que la moyenne et la variance, ne changent pas au cours du temps. C’est pourquoi la différenciation des séries est appliquée ici pour rendre les données stationnaires et ainsi permettre une analyse économétrique robuste.
+
+```{r include=FALSE}
+# Vérification de la stationnarité avec le test de Dickey-Fuller (ADF)
+adf.test(data$business_failures)
+adf.test(data$Unemployment_rate)
+adf.test(data$Gross_domestic_product)
+
+# Si les séries ne sont pas stationnaires, on applique la différenciation
+data$business_failures_diff <- c(NA, diff(data$business_failures))
+data$Unemployment_rate_diff <- c(NA, diff(data$Unemployment_rate))
+data$Gross_domestic_product_diff <- c(NA, diff(data$Gross_domestic_product))
+
+# Vérification après différenciation
+adf.test(na.omit(data$business_failures_diff))
+adf.test(na.omit(data$Unemployment_rate_diff))
+adf.test(na.omit(data$Gross_domestic_product_diff))
+```
+
+Les résultats des tests de stationnarité de Dickey-Fuller montrent que les séries business_failures, Unemployment_rate et Gross_domestic_product ne sont pas stationnaires au niveau (p-values > 0.05). Après différenciation, elles deviennent stationnaires avec des p-values inférieures à 0.01. Cela indique que ces variables sont intégrées d’ordre 1 (I(1)), ce qui justifie l'utilisation de modèles dynamiques comme l'ARDL ou l'ECM pour analyser leurs relations à long terme tout en capturant les dynamiques de court terme.
+
+## 4. Résultats des Estimations et commentaires
+
+```{r include=FALSE}
+model_ols <- lm(business_failures ~ Unemployment_rate + Gross_domestic_product, data = data)
+summary(model_ols)
+```
+
+```{r include=FALSE}
+coint_test <- ca.jo(data[, c("business_failures", "Unemployment_rate", "Gross_domestic_product")], type = "trace", K = 2)
+summary(coint_test)
+
+long_run_model <- lm(business_failures ~ Unemployment_rate + Gross_domestic_product, data = data)
+data$ecm <- residuals(long_run_model)
+
+data_zoo <- zoo(data[, c("business_failures", "Unemployment_rate", "Gross_domestic_product", "ecm")], order.by = data$Year_Trimestre)
+
+model_ecm <- dynlm(d(business_failures) ~ d(Unemployment_rate) + d(Gross_domestic_product) + L(ecm, 1), data = data_zoo)
+summary(model_ecm)
+```
+
+```{r include=FALSE}
+model_ardl <- dynlm(d(business_failures) ~ L(business_failures, 1) + d(Unemployment_rate) + d(Gross_domestic_product), data = data_zoo)
+summary(model_ardl)
+```
+
+```{r echo=FALSE}
+# Tests à ajouter
+test_breusch_pagan_ols <- bptest(model_ols)$p.value
+test_breusch_pagan_ecm <- bptest(model_ecm)$p.value
+test_breusch_pagan_ardl <- bptest(model_ardl)$p.value
+
+test_durbin_watson_ols <- dwtest(model_ols)$statistic
+test_durbin_watson_ecm <- dwtest(model_ecm)$statistic
+test_durbin_watson_ardl <- dwtest(model_ardl)$statistic
+
+test_autocorr_ols <- acf(residuals(model_ols), plot = FALSE)$acf[2]  # Premier lag
+test_autocorr_ecm <- acf(residuals(model_ecm), plot = FALSE)$acf[2]
+test_autocorr_ardl <- acf(residuals(model_ardl), plot = FALSE)$acf[2]
+
+# Utilisation de stargazer pour afficher les résultats des modèles
+stargazer(model_ols, model_ecm, model_ardl, 
+          type = "text", 
+          title = "Comparaison des Modèles",
+          add.lines = list(
+            c("Test de Breusch-Pagan", test_breusch_pagan_ols, test_breusch_pagan_ecm, test_breusch_pagan_ardl),
+            c("Statistique de Durbin-Watson", test_durbin_watson_ols, test_durbin_watson_ecm, test_durbin_watson_ardl),
+            c("Autocorrélation (1er lag)", test_autocorr_ols, test_autocorr_ecm, test_autocorr_ardl)
+          )
+)
+```
+
+### Rapport d’analyse des modèles OLS, ARDL et ECM
+
+Les modèles OLS, ARDL et ECM sont particulièrement adaptés à l’analyse des données de panel avec des tendances économiques. Le modèle OLS permet une estimation simple mais efficace des relations linéaires entre les variables, tandis que l'ARDL capture les relations à long terme et à court terme, en tenant compte de l’éventuelle présence de séries de données non stationnaires. Enfin, le modèle ECM (Error Correction Model) est utile pour ajuster rapidement les déséquilibres à court terme dans les séries économiques et refléter les ajustements à long terme. 
+
+Le tableau présente trois modèles d’analyse des faillites d’entreprises, avec une variable dépendante indiquant les business_failures (faillites d’entreprises) et la variation de cette variable dans différents cadres de régression. Nous allons examiner chaque modèle un par un et comparer les résultats pour en tire les conclusions nécessaires.
+
+L’objectif de cette analyse économétrique est ainsi d’évaluer les facteurs influençant les faillites d’entreprises en utilisant trois spécifications de modèles économétriques : une régression linéaire classique (OLS) et deux modèles dynamiques (régression dynamique et modèle dynamique avec correction d’erreur – ECM). 
+
+**Modèle OLS (Ordinary Least Squares)** : Régression linéaire simple des faillites d’entreprises en fonction des variables économiques clés (taux de chômage et PIB).
+**Modèle Dynamique** : Régression en prenant en compte les lags (décalages) des faillites d’entreprises, ce qui permet d’intégrer un effet de persistance dans les données.
+**Modèle Dynamique avec ECM (Error Correction Model)** : Ajout d'un terme de correction d'erreur pour modéliser l'ajustement à long terme des faillites d'entreprises par rapport aux variables économiques.
+
+### 1. Modèle OLS (Régression Linéaire)
+
+**Le modèle OLS**, basé sur la régression linéaire, a permis de démontrer une relation significative entre les faillites d’entreprises et les variables explicatives étudiées.
+
+En effet, concernant le taux de chômage (Unemployment_rate), on observe un coefficient de 83.155, avec une erreur standard de 16.273, ce qui indique ici une relation positive et significative à 1% (p < 0.01). Cela suggère qu'une augmentation du taux de chômage est fortement associée à une hausse des faillites d’entreprises, ce qui est en ligne avec les attentes théoriques. Dès lors, un taux de chômage plus élevé réduit la demande de produits et services, affectant ainsi la rentabilité des entreprises.
+
+Concernant le Produit intérieur brut (Gross_domestic_product), le coefficient de -3.929, avec une erreur standard de 0.220,ce qui révèle une relation négative et significative à 1% (p < 0.01). Ainsi, une augmentation du PIB est ainsi associée à une baisse des faillites, ce qui est intuitivement cohérent avec l’idée que la croissance économique soutient la viabilité des entreprises.
+
+**Autocorrélation et Hétéroscédasticité** : Le test de Durbin-Watson indique une forte autocorrélation (DW = 0.317), ce qui est préoccupant pour la validité du modèle. En outre, le test de Breusch-Pagan (0.0017) suggère la présence d’hétéroscédasticité, ce qui peut affecter l’efficacité des estimateurs.
+**R2 et F-statistique** : Avec un R2 de 0.772, le modèle explique 77,2% de la variance des faillites d’entreprises. La statistique F (230.347) est élevée et significative, confirmant que le modèle global est pertinent.
+
+### 2. Modèle Dynamique (ARDL)
+
+**Le modèle dynamique** ajuste les faillites d'entreprises pour tenir compte de l'effet de persistance, c'est-à-dire de l'influence des faillites passées sur celles de la période en cours.
+
+Concernant le Lag des faillites d’entreprises (L1(business_failures)), le coefficient de -0.041, bien que significatif à 10% (p < 0.1), cela suggère que les faillites passées ont un effet négatif modéré sur les faillites actuelles. Cela indique qu'une entreprise en difficulté a plus de chances de faire face à de nouvelles faillites dans le futur, mais l’effet est relativement faible.
+
+Lorsque l'on s'intéresse à la variation du taux de chômage (d(Unemployment_rate)), on observe un coefficient de 106.768, significatif à 1% (p < 0.01), ce qui souligne une forte réaction des faillites d’entreprises aux changements dans le taux de chômage. Cette dynamique est plus marquée par rapport au modèle OLS.
+
+Quant à la variation du PIB (d(Gross_domestic_product)), on observe un coefficient de 0.193, non significatif, ce qui indique que les variations du PIB n'ont pas d'impact significatif dans le modèle dynamique, ce qui pourrait être dû à la nature de la variable ou à l’inefficacité de la spécification dynamique dans ce cas.
+
+**Autocorrélation et Hétéroscédasticité** : Le modèle dynamique présente un test de Breusch-Pagan de 0.014, ce qui suggère la présence d'hétéroscédasticité, mais dans une moindre mesure que le modèle OLS. Le test de Durbin-Watson (2.243) est proche de 2, indiquant l'absence d’autocorrélation des résidus, ce qui est un résultat favorable.
+**R2 et F-statistique** : Avec un R2 de 0.140, ce modèle explique seulement 14% de la variance des faillites, ce qui montre que sa capacité explicative est relativement faible par rapport au modèle OLS. Cependant, la statistique F (7.301) reste significative, indiquant la pertinence du modèle dans le cadre dynamique.
+
+### 3. Modèle Dynamique avec ECM (Error Correction Model)
+
+L’introduction d’un terme de correction d’erreur (ECM) dans ce modèle permet d'examiner l’ajustement des faillites d'entreprises à long terme par rapport aux variables économiques.
+
+**ECM** (L(ecm, 1)) : Le coefficient de -0.131 est significatif à 1% (p < 0.01), ce qui indique qu’une part de l’écart par rapport à l’équilibre à long terme est corrigée au cours de la période suivante. Ce résultat suggère que, même après un choc, le système des faillites tend à revenir à un équilibre au fil du temps.
+
+**Variation du taux de chômage et du PIB** : Comme dans le modèle dynamique, la variation du taux de chômage reste significative, avec un coefficient de 93.034, mais la variation du PIB n'a toujours pas d'effet significatif.
+
+**Autocorrélation et Hétéroscédasticité** : Le test de Breusch-Pagan (0.575) montre qu’il n’y a pas de problème d’hétéroscédasticité. La statistique de Durbin-Watson (2.356) confirme qu’il n’y a pas d’autocorrélation des résidus, ce qui est un bon signe.
+
+**R2 et F-statistique** : Le R2 de 0.112 indique une faible capacité explicative du modèle, ce qui en fait le modèle le moins performant parmi les trois. La statistique F (5.659) reste significative, mais la faiblesse de l'explication suggère une limitation dans la capture des dynamiques des faillites d'entreprises.
+
+
+**Performance des Modèles** : 
+
+**Modèle OLS** : Il reste le plus robuste et le plus efficace pour expliquer les faillites d'entreprises, avec une capacité explicative élevée (R2 de 0.772). Toutefois, la présence d’autocorrélation et d’hétéroscédasticité doit être prise en compte.
+**Modèle ARDL** : Bien qu'il capture les effets de persistance des faillites, ce modèle explique seulement 14% de la variance, ce qui limite son utilité pratique pour prédire les faillites. L’effet du taux de chômage demeure prépondérant.
+**Modèle  ECM** : Ce modèle permet d’inclure une dynamique d'ajustement à long terme, mais sa capacité explicative reste très faible (R2 de 0.112). Cela montre que l'introduction de la correction d’erreur n’améliore pas substantiellement les prédictions des faillites d'entreprises.
+
+**Recommandations** :
+En effet, il serait pertinent de combiner les éléments des trois modèles dans une spécification plus sophistiquée, en particulier en prenant en compte les problèmes d’autocorrélation et d’hétéroscédasticité dans les modèles OLS. De plus, la spécification dynamique pourrait être améliorée en tenant compte d’autres variables susceptibles d’influencer les faillites d’entreprises, telles que les taux d’intérêt ou l’investissement.
+
+
+# III. Conclusion
+
+Cette étude met en évidence les principaux déterminants des faillites d'entreprises en France. Nos résultats indiquent que :
+Une augmentation du taux de chômage entraîne une hausse significative des faillites d’entreprises.
+Le PIB a un effet négatif sur les faillites, ce qui est conforme à l’intuition économique : une croissance économique plus forte réduit le risque de faillite.
+Le modèle ECM suggère une relation de long terme entre ces variables, avec un ajustement partiel des déséquilibres au fil du temps.
+Les résultats des tests diagnostiques montrent la nécessité d’utiliser des erreurs robustes et des modèles dynamiques pour obtenir des estimations fiables.
+
+Ces résultats suggèrent que les politiques économiques visant à stimuler la croissance du PIB et à réduire le chômage pourraient jouer un rôle clé dans la réduction du nombre de faillites d’entreprises en France. Une surveillance accrue des périodes de récession et des politiques de soutien aux entreprises en difficulté pourraient également atténuer les effets négatifs des cycles économiques.
+
+En récapitulant les points essentiels, cette analyse met en lumière l’importance de comprendre les facteurs liés aux faillites pour mieux anticiper les fluctuations économiques. Une réflexion sur les implications politiques spécifiques pour le gouvernement français s'avère pertinente. Par exemple, les politiques de relance économique mises en place pendant la crise sanitaire ont pu contribuer à amortir les effets d'une récession, mais l'impact à long terme des faillites sur l'économie française nécessite une évaluation approfondie. Le rôle des politiques publiques, en particulier celles visant à soutenir l'activité économique, pourrait être déterminant dans la gestion de futures crises économiques.
+
+# Références bibliographiques citées dans le document 
+
+-   Greene, W. (2012). Econometric Analysis.
+-   Wooldridge, J. (2010). Econometric Analysis of Cross Section and
+    Panel Data.
+-   INSEE : Sources de données.
+
+# Annexes
+
+Code R : 
+
+```{r}
+# Chargement des bibliothèques
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(zoo)
+library(lmtest)
+library(sandwich)
+library(tseries)
+library(ggplot2)
+library(stargazer)
+
+# Définition du répertoire de travail
+setwd("/Users/schneiderhugo/Desktop")
+
+# Chargement des données
+data <- read_excel("Données.xlsx")
+
+# Conversion des variables en numériques
+data$business_failures <- as.numeric(data$business_failures)
+data$Unemployment_rate <- as.numeric(data$Unemployment_rate)
+data$Gross_domestic_product <- as.numeric(data$Gross_domestic_product)
+
+# Vérification et correction de la colonne temporelle
+data$Year_Trimestre <- as.yearqtr(as.character(data$Year_Trimestre), format = "%Y-T%q")
+
+# Statistiques descriptives
+summary(data)
+
+# Vérification de la stationnarité avec le test de Dickey-Fuller (ADF)
+adf.test(data$business_failures)
+adf.test(data$Unemployment_rate)
+adf.test(data$Gross_domestic_product)
+
+# Si les séries ne sont pas stationnaires, on applique la différenciation
+data$business_failures_diff <- c(NA, diff(data$business_failures))
+data$Unemployment_rate_diff <- c(NA, diff(data$Unemployment_rate))
+data$Gross_domestic_product_diff <- c(NA, diff(data$Gross_domestic_product))
+
+# Vérification après différenciation
+adf.test(na.omit(data$business_failures_diff))
+adf.test(na.omit(data$Unemployment_rate_diff))
+adf.test(na.omit(data$Gross_domestic_product_diff))
+
+# Régression OLS classique
+model_ols <- lm(business_failures ~ Unemployment_rate + Gross_domestic_product, data = data)
+summary(model_ols)
+
+# Correction des erreurs avec des erreurs robustes de Newey-West
+coeftest(model_ols, vcov = NeweyWest(model_ols))
+
+# Vérification de l'autocorrélation des erreurs
+dwtest(model_ols)  # Durbin-Watson Test
+
+# Test d'hétéroscédasticité
+bptest(model_ols)  # Breusch-Pagan Test
+
+# Si l'autocorrélation et l'hétéroscédasticité sont présentes, utiliser des erreurs robustes de White
+coeftest(model_ols, vcov = vcovHC(model_ols, type = "HC1"))
+
+# Visualisation des variables
+ggplot(data, aes(x = Year_Trimestre, y = business_failures, group = 1)) +
+  geom_line(color = "blue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Évolution des Défaillances d'Entreprises en France",
+       x = "Trimestre",
+       y = "Nombre de faillites")
+
+ggplot(data, aes(x = Unemployment_rate, y = business_failures)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Lien entre Taux de Chômage et Défaillances d'Entreprises",
+       x = "Taux de chômage (%)",
+       y = "Défaillances d'entreprises")
+
+ggplot(data, aes(x = Gross_domestic_product, y = business_failures)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Lien entre PIB et Défaillances d'Entreprises",
+       x = "PIB (%)",
+       y = "Défaillances d'entreprises")
+
+
+str(data$Year_Trimestre)  # Vérifie le type de la colonne
+table(data$Year_Trimestre)  # Vérifie les valeurs uniques
+
+data_panel <- pdata.frame(data, index = c("Country", "Year_Trimestre"))
+
+
+# Estimation de la relation de long terme
+long_run_model <- lm(business_failures ~ Unemployment_rate + Gross_domestic_product, data = data)
+data$ecm <- residuals(long_run_model)  # Création du terme d'erreur
+
+# Ajout d`ecm` à `data_zoo`
+data_zoo$ecm <- coredata(data$ecm)  # S'assurer que `ecm` est bien aligné
+
+# Modèle ECM avec `dynlm()`
+model_ecm <- dynlm(d(business_failures) ~ d(Unemployment_rate) + d(Gross_domestic_product) + L(ecm, 1), data = data_zoo)
+
+# Résumé des résultats
+summary(model_ecm)
+
+# Comparaison avec un modèle ARDL si nécessaire
+
+# Définition des séries temporelles avec index trimestriel
+data_zoo <- zoo(data[, c("business_failures", "Unemployment_rate", "Gross_domestic_product")],
+                order.by = as.yearqtr(data$Year_Trimestre, format = "%Y-T%q"))
+data_zoo
+
+# Vérification de la conversion
+head(data_zoo)
+library(dynlm)
+model_ardl <- dynlm(d(business_failures) ~ L(business_failures, 1) + d(Unemployment_rate) + d(Gross_domestic_product), data = data_zoo)
+summary(model_ardl)
+
+# Résultats
+stargazer(model_ols, model_ecm, model_ardl, type = "text", title = "Comparaison des Modèles")
+```
+
