@@ -2,7 +2,7 @@
 
 **Auteur :** Hugo Schneider  
 **Date :** 7 février 2025  
-**Cours :** Économétrie des données de panel  
+**Cours :** Économétrie
 
 ---
 
