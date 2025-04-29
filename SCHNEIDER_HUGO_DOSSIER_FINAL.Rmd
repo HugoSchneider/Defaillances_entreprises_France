@@ -349,4 +349,3 @@ summary(model_ardl)
 # Résultats
 stargazer(model_ols, model_ecm, model_ardl, type = "text", title = "Comparaison des Modèles")
 ```
-
