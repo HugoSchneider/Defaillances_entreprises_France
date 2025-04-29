@@ -1,5 +1,5 @@
 ---
-title: "Économétrie des Données de Panel - Analyse Économétrique des Défaillances d'Entreprises en France"
+title: "Économétrie - Analyse Économétrique des Défaillances d'Entreprises en France"
 author: "SCHNEIDER HUGO"
 date: "7 Février 2025"
 output: pdf_document
@@ -151,7 +151,7 @@ stargazer(model_ols, model_ecm, model_ardl,
 
 ### Rapport d’analyse des modèles OLS, ARDL et ECM
 
-Les modèles OLS, ARDL et ECM sont particulièrement adaptés à l’analyse des données de panel avec des tendances économiques. Le modèle OLS permet une estimation simple mais efficace des relations linéaires entre les variables, tandis que l'ARDL capture les relations à long terme et à court terme, en tenant compte de l’éventuelle présence de séries de données non stationnaires. Enfin, le modèle ECM (Error Correction Model) est utile pour ajuster rapidement les déséquilibres à court terme dans les séries économiques et refléter les ajustements à long terme. 
+Les modèles OLS, ARDL et ECM sont particulièrement adaptés à l’analyse des données en séries temporelles avec des tendances économiques. Le modèle OLS permet une estimation simple mais efficace des relations linéaires entre les variables, tandis que l'ARDL capture les relations à long terme et à court terme, en tenant compte de l’éventuelle présence de séries de données non stationnaires. Enfin, le modèle ECM (Error Correction Model) est utile pour ajuster rapidement les déséquilibres à court terme dans les séries économiques et refléter les ajustements à long terme. 
 
 Le tableau présente trois modèles d’analyse des faillites d’entreprises, avec une variable dépendante indiquant les business_failures (faillites d’entreprises) et la variation de cette variable dans différents cadres de régression. Nous allons examiner chaque modèle un par un et comparer les résultats pour en tire les conclusions nécessaires.
 
@@ -318,7 +318,6 @@ ggplot(data, aes(x = Gross_domestic_product, y = business_failures)) +
 str(data$Year_Trimestre)  # Vérifie le type de la colonne
 table(data$Year_Trimestre)  # Vérifie les valeurs uniques
 
-data_panel <- pdata.frame(data, index = c("Country", "Year_Trimestre"))
 
 
 # Estimation de la relation de long terme
